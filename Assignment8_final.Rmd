@@ -1,0 +1,353 @@
+---
+title: "assignment8"
+author: "William Hope"
+date: "2023-03-27"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(stargazer)
+library(knitr)
+library(sandwich)
+library(lmtest)
+library(AER)
+library(momentfit)
+library(tinytex)
+```
+
+```{r functions, echo=FALSE}
+getDat4 <- function(n, a1=20, a2=1, a3=-2, d1=100, d2=-1, d3=2, sige=16,
+                    sigeta=16, sigX=5, sigZ=5)
+{
+    e <- rnorm(n, 0, sqrt(sige))
+    eta <- rnorm(n, 0, sqrt(sigeta))
+    X1 <- rnorm(n, 10, sqrt(sigX))
+    X2 <- rnorm(n, 10, sqrt(sigX))
+    Z <- rnorm(n, 10, sqrt(sigZ))
+    d4 <- runif(1,-.01,.01)
+    Q <- (a2*(d1+eta+d3*X1+d4*X2)-d2*(a1+a3*Z+e))/(a2-d2)
+    P <- ((d1+eta+d3*X1+d4*X2)-(a1+a3*Z+e))/(a2-d2)
+    dat <- data.frame(P,Q,Z,X1,X2,e,eta)
+    list(dat=dat, a=c(a1,a2,a3), d=c(d1,d2,d3,d4), sig=c(e=sige, eta=sigeta))
+}
+plotEqu4 <- function(obj, nCurves=NULL, nPoints=NULL, f=.9, t=1.1)
+{
+    dat <- obj$dat
+    if (!is.null(nPoints))
+        dat <- dat[1:nPoints,]
+    plot(Q~P, dat, pch=21, col="lightblue", bg="lightblue",
+         main="Demands and Supplies with their equilibrium points",
+         bty='n')
+    if (is.null(nCurves))
+    {
+        n <- nrow(dat)
+    } else {
+        n <- nCurves
+        if (nCurves>nrow(dat))
+            stop("The number of curves cannot exceed the number of points")
+    }
+    for (i in 1:n)
+    {
+        curve(obj$d[1]+obj$d[2]*x+obj$d[3]*dat$X1[i]+obj$d[4]*dat$X2[i]+dat$eta[i],
+              dat$P[i]*f, dat$P[i]*t,
+              col="green", add=TRUE)
+        curve(obj$a[1]+obj$a[2]*x+obj$a[3]*dat$Z[i]+dat$e[i],
+              dat$P[i]*f, dat$P[i]*t,
+              col="orange", add=TRUE)
+    }
+    points(dat$P[1:n], dat$Q[1:n], pch=23, col="darkred",bg="darkred")
+    grid()
+}
+
+printEq4 <- function(obj)
+{
+    cat("\\begin{eqnarray*}\n")
+    cat("Q^d &=& ", obj$d[1], ifelse(obj$d[2]<0, "-", "+"), abs(obj$d[2]), "P",
+        ifelse(obj$d[3]<0, "-", "+"), abs(obj$d[3]), "X_1",
+        ifelse(obj$d[4]<0, "-", "+"), abs(obj$d[4]), "X_2 + \\eta\\\\\n",
+        "Q^s &=& ", obj$a[1], ifelse(obj$a[2]<0, "-", "+"), abs(obj$a[2]), "P",
+        ifelse(obj$a[3]<0, "-", "+"), abs(obj$a[3]), "Z + e\n",
+        "\\end{eqnarray*}\n", sep="")
+}  
+```
+
+# Part 1
+
+For this part, we need to generate new demand and supply data, using
+different functions (hidden above). It looks similar to the previous
+assignment, but the demand now depends on two exogenous regressors.
+
+```{r, fig.align='center', out.width='60%'}
+set.seed(20885971)
+obj <- getDat4(200)
+plotEqu4(obj, 5, 20)
+```
+
+```{r, results='asis'}
+printEq4(obj)
+```
+
+## Estimating the Supply function
+
+The model we want to analyze is the following supply and demand system:
+
+\begin{eqnarray*}
+Q^d & = & \delta_1 + \delta_2 P + \delta_3 X_1 +\delta_4 X_2+ \eta\\
+Q^s & = & \alpha_1 + \alpha_2 P + \alpha_3 Z + e
+\end{eqnarray*}
+
+where $X_1$, $X_2$ and $Z$ are exogenous variables (uncorrelated with
+$\eta$ and e).
+
+First, we generate a dataset using my student ID as seed by running
+the following code.
+
+```{r}
+set.seed(20885971) ## Entering student ID
+sigeta <- runif(1, 8, 25)
+sige <- runif(1, 8, 25)
+sigX <- runif(1, 3, 10)
+sigZ <- runif(1, 3, 10)
+d3 <- round(runif(1,-3,3),2) # The exogenous demand shifter
+a3 <- round(runif(1, -3,3),2) # The exogenous supply shifter
+d2 <- round(runif(1, -5,-.5),2) # the demand slope
+a2 <- round(runif(1, .5, 5),2) # the supply slope
+obj <- getDat4(n=100, a2=a2, d2=d2, d3=d3, a3=a3, sige=sige, sigeta=sigeta,
+               sigX=sigX, sigZ=sigX)
+save(obj, file="A8Data.rda")
+load("A8Data.rda")
+```
+
+We only want to estimate the supply function. I want you to try the
+following sets of excluded exogenous variables: (i) $\{X_1\}$, (ii)
+$\{X_2\}$ and (iii) $\{X_1,X_2\}$. Don't forget that the set of
+instruments must include the included exogenous variable (Z in this
+case). For each set of instruments, answer the following questions.
+
+# Question 1
+
+Estimated the reduced form and testing if the instruments are strong. 
+
+```{r}
+
+red <- lm(P~X1, obj$dat)
+knitr::kable(coeftest(red, vcov.=vcovHC)[,])
+
+blue <- lm(P~X2, obj$dat)
+knitr::kable(coeftest(blue, vcov.=vcovHC)[,])
+
+yellow <- lm(P~X1+X2+Z, obj$dat)
+knitr::kable(coeftest(yellow, vcov.=vcovHC)[,])
+
+```
+
+When testing X1 by itself, it is significant. X2 is not significant.
+Morever, when testing all the instrumental variables, X1 and Z are significant.
+
+
+# Question 2
+
+Using `ivreg` to estimate the model by TSLS. Interpretation below.
+
+```{r}
+# Using IRVEG with X1
+fit <- ivreg(Q~P | X1, data=obj$dat)
+fit_OLS <- lm(Q~P+X1, data=obj$dat) # Using OLS to compare results 
+
+se <- sqrt(diag(vcovHAC(fit)))
+se2 <- sqrt(diag(vcovHAC(fit_OLS)))
+
+stargazer(fit, fit_OLS, se=list(se, se2), header=FALSE, float=FALSE, type = 'text')
+
+# Using IRVEG with X2
+fit <- ivreg(Q~P | X2, data=obj$dat)
+fit_OLS <- lm(Q~P+X2, data=obj$dat) # Using OLS to compare results 
+
+se <- sqrt(diag(vcovHAC(fit)))
+se2 <- sqrt(diag(vcovHAC(fit_OLS)))
+
+stargazer(fit, fit_OLS, se=list(se, se2), header=FALSE, float=FALSE, type = 'text')
+
+# Using IRVEG with X1, X2, and Z
+fit <- ivreg(Q~P | X1+X2+Z, data=obj$dat)
+fit_OLS <- lm(Q~P+X1+X2+Z, data=obj$dat) # Using OLS to compare results 
+
+se3 <- sqrt(diag(vcovHAC(fit)))
+se4 <- sqrt(diag(vcovHAC(fit_OLS)))
+stargazer(fit, fit_OLS, se=list(se, se2), header=FALSE, float=FALSE, type = 'text')
+
+
+```
+
+When reviewing the results, it is clear IV does a better job with X1, while OLS
+does a better job with the other models. 
+
+
+# Question 3
+
+Testing if the instruments are valid. Interpretation below.
+
+
+```{r}
+
+fit <- ivreg(Q~P | X1, data=obj$dat)
+AER:::ivdiag(fit)
+
+fit <- ivreg(Q~P | X2, data=obj$dat)
+AER:::ivdiag(fit)
+
+fit <- ivreg(Q~P | X1+X2+Z, data=obj$dat)
+AER:::ivdiag(fit)
+
+
+```
+We have strong instruments when we use X1, X2, and Z. 
+
+# Question 4
+
+Testing if $P$ is exogenous. Interpretation below.
+
+```{r}
+
+red <- lm(P~X1, obj$dat) # testing exogeneity of price with X1, X2, and Z
+uhat <- residuals(red)
+cf <- lm(Q~P + uhat, obj$dat)
+knitr::kable(coeftest(cf, vcov=vcovHC)[,])
+
+red <- lm(P~X2, obj$dat) # testing exogeneity of price with X1, X2, and Z
+uhat <- residuals(red)
+cf <- lm(Q~P + uhat, obj$dat)
+knitr::kable(coeftest(cf, vcov=vcovHC)[,])
+
+red <- lm(P~X1+X2+Z, obj$dat) # testing exogeneity of price with X1, X2, and Z
+uhat <- residuals(red)
+cf <- lm(Q~P + uhat, obj$dat)
+knitr::kable(coeftest(cf, vcov=vcovHC)[,])
+
+```
+
+It appears P is exogenous when we use X2, but not exogenous in the other cases.
+
+Ideally, it appears that the 1st method is not better among the 3. The reason 
+why is because the 2nd method, using AER performs multiple tests and allows you
+to decide with fewer lines of code. It is also much easier to read and 
+understand whether the IV are significant. The 1st does provide the 
+same/similar results, but the 2nd and 3rd methods are much more concise.
+
+# Part 2
+
+For this part, we want to work with the fish data used by Kathryn
+Graddy in the paper *Fulton Fish Market* published in the Journal of
+Economic Perspectives in 2006. The dataset contains daily data
+from December 1991 to March 1992. We use the `read.table` function to extract 
+the data. 
+
+Note: I use my specific directory, which must be changed for external 
+use to your directory.
+
+```{r}
+Fulton <- read.table("C:/Users/savag/OneDrive/Documents/Econ 323/Fulton.txt") 
+# change when necessary to your directory
+```
+
+## Question 1:
+
+We reproduce the Table 2 from the paper. For the IV regressions (there
+are 2 in the table), we test the exogeneity of price and the relevance of
+the instrument (Stormy). Interpretation below.
+
+```{r}
+fit <- lm(LogQuantity~LogPrice, Fulton)
+fit2 <- lm(LogQuantity~LogPrice+Monday+Tuesday+Wednesday+Thursday+Cold+Rainy, Fulton)
+fit3 <- ivreg(LogQuantity~LogPrice, data=Fulton)
+fit4 <- ivreg(LogQuantity~LogPrice+Monday+Tuesday+Wednesday+Thursday+Cold+Rainy | Cold+Rainy+Monday+Tuesday+Wednesday+Thursday+Stormy, data=Fulton)
+
+se <- sqrt(diag(vcovHAC(fit)))
+se2 <- sqrt(diag(vcovHAC(fit2)))
+se3 <- sqrt(diag(vcovHAC(fit3)))
+se4 <- sqrt(diag(vcovHAC(fit4)))
+stargazer(fit, fit2, fit3, fit4, se=list(se, se2, se3, se4), header=FALSE, float=FALSE, type = 'text')
+
+red <- lm(LogPrice~Stormy, Fulton) # testing exogeneity of price
+uhat <- residuals(red)
+cf <- lm(LogQuantity~LogPrice + uhat, Fulton)
+knitr::kable(coeftest(cf, vcov=vcovHC)[,])
+
+# relevance of the instrument (Stormy)
+yellow <- lm(LogPrice~Stormy++Monday+Tuesday+Wednesday+Thursday, Fulton) 
+
+knitr::kable(coeftest(yellow, vcov.=vcovHC)[,])
+
+AER:::ivdiag(fit4)
+
+```
+
+When looking at the new table, reproduced from the paper, we can see that the 
+coefficients are similar and the standard errors are very similar. While
+some are different, it is clear that our tables are the same when calculating
+each variable's significance from the paper and comparing the results.
+
+
+When testing the exogeneity of log price, we see that the coefficient of uhat 
+is highly insignificant, so we strongly accept the hypothesis that ed76 is 
+exogenous.
+
+
+## Question 2
+
+We cannot test the validity of the instrument when we only use
+$Stormy$. We estimate the demand using the instruments `Cold` and `Rainy`
+and perform all tests (validity, relevance and exogeneity). 
+
+```{r}
+
+red <- lm(LogPrice~Cold+Rainy, Fulton)
+edHat <- fitted(red)
+sec <- lm(LogQuantity~edHat, Fulton)
+b <- coef(sec)
+uhat <- with(Fulton, LogQuantity-b[1]-b[2]*LogPrice)
+J <- lm(uhat~Cold+Rainy, Fulton)
+nobs(J)*summary(J)$r.square
+
+qchisq(.95,1)
+
+uhat <- residuals(red)
+cf <- lm(LogQuantity~LogPrice + uhat, Fulton)
+knitr::kable(coeftest(cf, vcov=vcovHC)[,])
+
+```
+
+Interpretation of the results. Which instrument(s) seems to be the best choice?
+
+We do not reject the hypothesis that the instruments are exogenous.
+
+We can see that the coefficient of uhat is highly insignificant, we strongly 
+reject the hypothesis that ed76 is NOT exogenous. 
+
+## Question 3:
+
+We want to see in this question if the demand function can be
+estimated. Assume the following demand and supply:
+
+\begin{eqnarray*}
+\log(Q^s) &=& \alpha_1 + \alpha_2\log(P)+\alpha_3 Mon + \alpha_4 Tue + 
+\alpha_5 Wed + \alpha_6 Thu + \alpha_7 Stormy + e\\
+\log(Q^d) &=& \delta_1 + \delta_2\log(P) + \delta_3 Cold + \delta_4 Rainy + u
+\end{eqnarray*}
+
+Can we estimate the supply function? We use TSLS and by performing the 
+appropriate tests.
+
+```{r}
+
+supplyIV <- ivreg(LogQuantity~LogPrice+Monday+Tuesday+Wednesday+Thursday | Monday+Tuesday+Wednesday+Thursday+Stormy, data=Fulton)
+knitr::kable(coeftest(supplyIV, vcov=vcovHC)[,])
+
+AER:::ivdiag(supplyIV)
+
+```
+
+We see that the test results in strong instruments. It appears we can estimate
+the supply function.
+
